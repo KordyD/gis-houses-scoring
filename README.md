@@ -1,57 +1,71 @@
-# GIS Project: OSM → PostGIS loader
+# Карта комфортности районов
 
-Этот репозиторий содержит базовую инфраструктуру для загрузки открытых данных OpenStreetMap в PostGIS.
+Интерактивная карта для оценки качества жилых районов города на основе близости к метро, паркам и школам/детским садам.
 
-## Что есть
-- `docker-compose.yml` — поднимает контейнер PostGIS с инициализацией из `db/init`.
-- `scripts/ingest_osm.py` — скачивает выбранные объекты OSM для заданного города и пишет в PostGIS.
-- `backend/` — Flask API, отдаёт GeoJSON жилых зон из PostGIS.
-- `frontend/` — React + Leaflet-клиент для просмотра жилых зон на карте.
-- `requirements.txt` — зависимости для скрипта загрузки.
+## Описание
 
-## Запуск базы
-1. Установите Docker и Docker Compose.
-2. Поднимите базу: `docker compose up -d db`.
-3. После старта в контейнере будет создана БД `gis`, расширения PostGIS и роль `gis_ingest` (пароль `gis_ingest_password`).
+Проект загружает данные из OpenStreetMap, хранит их в PostGIS, вычисляет балл комфортности для каждого жилого района и визуализирует результаты на интерактивной карте.
 
-## Загрузка данных OSM в PostGIS
-1. Создайте и активируйте Python venv, установите зависимости: `pip install -r requirements.txt`.
-2. Запустите скрипт, указав город:
-   ```bash
-   python scripts/ingest_osm.py --place "Moscow, Russia" --overwrite
-   ```
+**Алгоритм скоринга:**  
+Для каждого жилого полигона вычисляется расстояние до ближайшего метро, парка и школы. Балл комфортности рассчитывается как взвешенная сумма нормированных значений:
 
-### Параметры скрипта
-- `--place` — обязательное название города/области (например, `"Saint Petersburg, Russia"`).
-- `--schema` — схема в БД (по умолчанию `public`).
-- `--overwrite` — заменить таблицы вместо добавления в конец.
-- Подключение к БД берётся из переменных окружения `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`; при их отсутствии используются значения по умолчанию (`localhost:5432`, `gis`, `gis`, `gis_password`).
+```
+score = (w_metro × metro_score + w_parks × parks_score + w_schools × schools_score) / (w_metro + w_parks + w_schools)
+```
 
-### Что скачивается
-Скрипт создаёт таблицы:
-- `residential_areas` — полигоны жилой застройки (`landuse=residential`, жилые `building=*`), основная маска для расчётов.
-- `metro_stations` — метро/железнодорожные станции.
-- `parks` — парки, сады, рекреационные зоны.
-- `schools` — школы и детские сады.
+где `score_i = max(0, 1 - dist_i / d_i)`, `dist_i` — расстояние в метрах, `d_i` — максимальный допустимый радиус.
 
-## Backend: Flask API
-1. Экспортируйте подключения к БД (по умолчанию используются те же, что и для загрузчика):
-   ```bash
-   export POSTGRES_HOST=localhost
-   export POSTGRES_PORT=5432
-   export POSTGRES_DB=gis
-   export POSTGRES_USER=gis
-   export POSTGRES_PASSWORD=gis_password
-   ```
-2. Установите зависимости (используются из корневого `requirements.txt`).
-3. Запустите сервер: `python backend/app.py`. Эндпоинт `GET /api/residential?tolerance=20` вернёт FeatureCollection из таблицы `residential_areas` (допуск упрощения в метрах).
+## Быстрый старт
 
-## Frontend: React + Leaflet
-1. Перейдите в `frontend/`, установите зависимости: `npm install`.
-2. Скопируйте пример `.env`: `cp frontend/.env.example frontend/.env` и при необходимости смените порт (например, `http://localhost:5001`).
-3. Запустите dev-сервер: `npm run dev` (по умолчанию на `http://localhost:5173`).
-4. Откройте в браузере; карта загрузит GeoJSON жилых зон из backend и нарисует их на фоне OSM тайлов. Слайдер регулирует упрощение геометрии.
+### 1. База данных
+```bash
+docker compose up -d db
+```
+PostGIS поднимется на `localhost:5432`, БД `gis`, пользователь `gis` / `gis_password`.
 
-## Полезно знать
-- При повторном запуске с `--overwrite` таблицы пересоздаются, что удобно для обновления данных.
-- Для отладки можно включить кэширование и логирование osmnx, см. документацию библиотеки.
+### 2. Загрузка данных
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python scripts/ingest_osm.py --place "Primorsky District, Saint Petersburg, Russia" --overwrite
+```
+
+Загружаются таблицы: `residential_areas`, `metro_stations`, `parks`, `schools`.
+
+### 3. Backend
+```bash
+PORT=5001 python backend/app.py
+```
+API запустится на `http://localhost:5001`.
+
+**Эндпоинты:**
+- `GET /api/residential?tolerance=20` — жилые полигоны (GeoJSON).
+- `GET /api/comfort?tolerance=20&w_metro=0.5&w_parks=0.25&w_schools=0.25&d_metro=1200&d_parks=800&d_schools=800` — карта комфортности с настраиваемыми весами и радиусами.
+- `GET /api/pois` — точки интереса (метро, парки, школы).
+
+### 4. Frontend
+```bash
+cd frontend
+npm install
+cp .env.example .env
+# Отредактируйте .env: VITE_API_BASE=http://localhost:5001
+npm run dev
+```
+Откройте `http://localhost:5173`.
+
+## Структура проекта
+
+- `docker-compose.yml` — контейнер PostGIS
+- `db/init/` — SQL-скрипты инициализации БД
+- `scripts/ingest_osm.py` — загрузчик данных из OSM
+- `backend/app.py` — Flask API для расчёта комфортности
+- `frontend/` — React + Leaflet интерфейс с переключателями слоёв
+
+## Возможности
+
+- **Интерактивная карта** с цветовой шкалой комфортности (от красного к зелёному).
+- **Переключатели слоёв:** комфортность, жилые зоны, метро, парки, школы.
+- **Тултипы** с детализацией: баллы, расстояния до объектов.
+- **Настройки упрощения геометрии** для быстрой отрисовки больших наборов данных.
+- **Параметризуемый расчёт** через query-параметры API (веса критериев, радиусы поиска).

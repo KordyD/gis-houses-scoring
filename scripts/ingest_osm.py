@@ -25,9 +25,8 @@ FEATURES: Dict[str, Dict] = {
     },
     "metro_stations": {
         "tags": {
-            "railway": ["station", "halt", "stop", "subway_entrance"],
-            "public_transport": ["station", "stop_position", "stop_area"],
-            "station": ["subway", "light_rail"],
+            "station": ["subway"],
+            "railway": ["subway_entrance"],
         },
     },
     "parks": {
