@@ -1,0 +1,5 @@
+venv/
+.cache-osmnx/
+__pycache__/
+node_modules/
+cache/

@@ -1,0 +1,154 @@
+:root {
+  --bg: #0f1626;
+  --panel: #161f32;
+  --text: #e6ebff;
+  --muted: #9fb0cc;
+  --accent: #5cf0c0;
+  --error: #ff6b6b;
+  --font: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: radial-gradient(circle at 20% 20%, rgba(92, 240, 192, 0.06), transparent 30%),
+    radial-gradient(circle at 80% 0%, rgba(92, 240, 192, 0.04), transparent 25%),
+    var(--bg);
+  color: var(--text);
+}
+
+.page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel {
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  background: var(--panel);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+h1 {
+  margin: 8px 0 12px;
+  font-size: 28px;
+  letter-spacing: -0.4px;
+}
+
+p {
+  margin: 0;
+}
+
+.eyebrow {
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+  max-width: 620px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+
+input[type="range"] {
+  width: 220px;
+  accent-color: var(--accent);
+}
+
+.value {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pill.loading {
+  color: #ffd166;
+}
+
+.pill.ready {
+  color: var(--accent);
+}
+
+.pill.error {
+  color: var(--error);
+}
+
+.map-wrap {
+  flex: 1;
+  position: relative;
+}
+
+.map-wrap .placeholder {
+  position: absolute;
+  z-index: 500;
+  right: 16px;
+  top: 16px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #0b1322;
+}
+
+.toast {
+  position: absolute;
+  z-index: 600;
+  left: 16px;
+  bottom: 16px;
+  padding: 12px 14px;
+  background: #1f293a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  max-width: 360px;
+  font-size: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.toast.error {
+  border-color: rgba(255, 107, 107, 0.4);
+}
