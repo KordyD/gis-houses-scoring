@@ -40,6 +40,31 @@ FEATURES: Dict[str, Dict] = {
             "amenity": ["school", "kindergarten"],
         },
     },
+    "highways": {
+        "tags": {
+            "highway": ["motorway", "trunk", "primary", "secondary", "tertiary"],
+        },
+    },
+    "railways": {
+        "tags": {
+            "railway": ["rail"],
+        },
+    },
+    "industrial_zones": {
+        "tags": {
+            "landuse": ["industrial", "railway"],
+        },
+    },
+    "airports": {
+        "tags": {
+            "aeroway": ["aerodrome", "runway", "helipad"],
+        },
+    },
+    "bars": {
+        "tags": {
+            "amenity": ["bar", "pub", "nightclub", "biergarten"],
+        },
+    },
 }
 
 
@@ -75,12 +100,17 @@ def normalize_columns(gdf: gpd.GeoDataFrame, feature_label: str) -> gpd.GeoDataF
         "leisure",
         "landuse",
         "building",
+        "highway",
+        "aeroway",
         "geometry",
     }
     drop_cols = [c for c in gdf.columns if c not in keep]
     gdf = gdf.drop(columns=drop_cols)
     gdf = gdf.rename_geometry("geom")
-    gdf["name"] = gdf.get("name", "").fillna("")
+    if "name" not in gdf.columns:
+        gdf["name"] = ""
+    else:
+        gdf["name"] = gdf["name"].fillna("")
     gdf["source"] = feature_label
     return gdf
 

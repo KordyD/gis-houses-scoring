@@ -3,63 +3,72 @@ import { GeoJSON, MapContainer, TileLayer } from "react-leaflet";
 import * as L from "leaflet";
 
 const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:5000";
-const defaultCenter = [55.751244, 37.618423];
+const defaultCenter = [59.9311, 30.3609];
 
 function App() {
   const [comfort, setComfort] = useState(null);
   const [comfortStatus, setComfortStatus] = useState("loading");
   const [comfortError, setComfortError] = useState("");
-  const [residential, setResidential] = useState(null);
-  const [resStatus, setResStatus] = useState("loading");
-  const [resError, setResError] = useState("");
   const [pois, setPois] = useState(null);
   const [poiStatus, setPoiStatus] = useState("loading");
   const [poiError, setPoiError] = useState("");
-  const [tolerance, setTolerance] = useState(20);
   const [showComfort, setShowComfort] = useState(true);
-  const [showResidential, setShowResidential] = useState(true);
   const [showMetro, setShowMetro] = useState(true);
   const [showParks, setShowParks] = useState(true);
   const [showSchools, setShowSchools] = useState(true);
+  const [showHighways, setShowHighways] = useState(false);
+  const [showRailways, setShowRailways] = useState(false);
+  const [showIndustrial, setShowIndustrial] = useState(false);
+  const [showAirports, setShowAirports] = useState(false);
+  const [showBars, setShowBars] = useState(false);
+  const [wMetro, setWMetro] = useState(0.35);
+  const [wParks, setWParks] = useState(0.20);
+  const [wSchools, setWSchools] = useState(0.20);
+  const [wNoise, setWNoise] = useState(0.25);
+  const [debouncedWeights, setDebouncedWeights] = useState({ wMetro: 0.35, wParks: 0.20, wSchools: 0.20, wNoise: 0.25 });
   const mapRef = useRef(null);
+  const comfortReqSeq = useRef(0);
+  const [comfortKey, setComfortKey] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedWeights({ wMetro, wParks, wSchools, wNoise });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [wMetro, wParks, wSchools, wNoise]);
 
   useEffect(() => {
     setComfortStatus("loading");
     setComfortError("");
-    fetch(`${apiBase}/api/comfort?tolerance=${tolerance}`)
+    const controller = new AbortController();
+    const currentSeq = ++comfortReqSeq.current;
+    const params = new URLSearchParams({
+      w_metro: debouncedWeights.wMetro,
+      w_parks: debouncedWeights.wParks,
+      w_schools: debouncedWeights.wSchools,
+      w_noise: debouncedWeights.wNoise,
+      _ts: Date.now(),
+    });
+    fetch(`${apiBase}/api/comfort?${params}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         return res.json();
       })
       .then((data) => {
-        setComfort(data);
-        setComfortStatus("ready");
+        if (currentSeq === comfortReqSeq.current) {
+          setComfort(data);
+          setComfortStatus("ready");
+          setComfortKey((k) => k + 1);
+        }
       })
       .catch((err) => {
+        if (err.name === "AbortError") return;
         console.error(err);
         setComfortStatus("error");
         setComfortError(err.message || "fetch failed");
       });
-  }, [tolerance]);
-
-  useEffect(() => {
-    setResStatus("loading");
-    setResError("");
-    fetch(`${apiBase}/api/residential?tolerance=${tolerance}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return res.json();
-      })
-      .then((data) => {
-        setResidential(data);
-        setResStatus("ready");
-      })
-      .catch((err) => {
-        console.error(err);
-        setResStatus("error");
-        setResError(err.message || "fetch failed");
-      });
-  }, [tolerance]);
+    return () => controller.abort();
+  }, [debouncedWeights]);
 
   useEffect(() => {
     setPoiStatus("loading");
@@ -79,15 +88,6 @@ function App() {
         setPoiError(err.message || "fetch failed");
       });
   }, []);
-
-  useEffect(() => {
-    if (!comfort || !comfort.features || !comfort.features.length) return;
-    const layer = L.geoJSON(comfort);
-    const bounds = layer.getBounds();
-    if (bounds.isValid() && mapRef.current) {
-      mapRef.current.fitBounds(bounds, { padding: [20, 20], maxZoom: 15 });
-    }
-  }, [comfort]);
 
   const palette = useMemo(
     () => [
@@ -127,10 +127,11 @@ function App() {
 
   const onEachComfort = useCallback((feature, layer) => {
     if (!feature?.properties) return;
-    const { name, score, dist_metro_m, dist_parks_m, dist_schools_m } = feature.properties;
+    const { name, score, quietness, dist_metro_m, dist_parks_m, dist_schools_m } = feature.properties;
     const lines = [
       `<strong>${name || "Жилая зона"}</strong>`,
       `Баллы: ${(score ?? 0).toFixed(3)}`,
+      `Тишина: ${(quietness ?? 0).toFixed(3)}`,
       `Метро: ${dist_metro_m ?? "–"} м`,
       `Парки: ${dist_parks_m ?? "–"} м`,
       `Школы: ${dist_schools_m ?? "–"} м`,
@@ -144,6 +145,11 @@ function App() {
       metro: "#316cff",
       park: "#2ecc71",
       school: "#f39c12",
+      highway: "#e74c3c",
+      railway: "#95a5a6",
+      industrial: "#8e44ad",
+      airport: "#34495e",
+      bar: "#9b9b57",
     };
     const color = colors[kind] || "#888";
     return L.circleMarker(latlng, {
@@ -161,22 +167,17 @@ function App() {
       ...(showMetro ? ["metro"] : []),
       ...(showParks ? ["park"] : []),
       ...(showSchools ? ["school"] : []),
+      ...(showHighways ? ["highway"] : []),
+      ...(showRailways ? ["railway"] : []),
+      ...(showIndustrial ? ["industrial"] : []),
+      ...(showAirports ? ["airport"] : []),
+      ...(showBars ? ["bar"] : []),
     ]);
     return {
       type: "FeatureCollection",
       features: pois.features.filter((f) => kindsAllowed.has(f?.properties?.kind)),
     };
-  }, [pois, showMetro, showParks, showSchools]);
-
-  const residentialStyle = useMemo(
-    () => ({
-      color: "#9fb0cc",
-      weight: 1,
-      fillColor: "#2a3350",
-      fillOpacity: 0.15,
-    }),
-    []
-  );
+  }, [pois, showMetro, showParks, showSchools, showHighways, showRailways, showIndustrial, showAirports, showBars]);
 
   return (
     <div className="page">
@@ -185,31 +186,70 @@ function App() {
           <p className="eyebrow">PostGIS → Leaflet</p>
           <h1>Карта комфортности районов</h1>
           <p className="muted">
-            Цвет отражает интегральный балл по близости к метро, паркам и школам. Регулируйте допуск
-            упрощения геометрии (в метрах) для быстрой отрисовки.
+            Цвет отражает интегральный балл по близости к метро, паркам, школам и тишине.
           </p>
         </div>
         <div className="controls">
           <label>
-            Допуск упрощения, м
+            Метро (важность)
             <input
               type="range"
               min="0"
-              max="200"
-              step="5"
-              value={tolerance}
-              onChange={(e) => setTolerance(Number(e.target.value))}
+              max="1"
+              step="0.05"
+              value={wMetro}
+              onChange={(e) => setWMetro(Number(e.target.value))}
             />
-            <span className="value">{tolerance} м</span>
+            <span className="value">{wMetro.toFixed(2)}</span>
+          </label>
+          <label>
+            Парки (важность)
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={wParks}
+              onChange={(e) => setWParks(Number(e.target.value))}
+            />
+            <span className="value">{wParks.toFixed(2)}</span>
+          </label>
+          <label>
+            Школы (важность)
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={wSchools}
+              onChange={(e) => setWSchools(Number(e.target.value))}
+            />
+            <span className="value">{wSchools.toFixed(2)}</span>
+          </label>
+          <label>
+            Тишина (важность)
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={wNoise}
+              onChange={(e) => setWNoise(Number(e.target.value))}
+            />
+            <span className="value">{wNoise.toFixed(2)}</span>
           </label>
           <div className={`pill ${comfortStatus}`}>{comfortStatus}</div>
         </div>
         <div className="toggles">
           <label><input type="checkbox" checked={showComfort} onChange={(e) => setShowComfort(e.target.checked)} /> Комфорт</label>
-          <label><input type="checkbox" checked={showResidential} onChange={(e) => setShowResidential(e.target.checked)} /> Жилая маска</label>
           <label><input type="checkbox" checked={showMetro} onChange={(e) => setShowMetro(e.target.checked)} /> Метро</label>
           <label><input type="checkbox" checked={showParks} onChange={(e) => setShowParks(e.target.checked)} /> Парки</label>
           <label><input type="checkbox" checked={showSchools} onChange={(e) => setShowSchools(e.target.checked)} /> Школы/сады</label>
+          <label><input type="checkbox" checked={showHighways} onChange={(e) => setShowHighways(e.target.checked)} /> Дороги</label>
+          <label><input type="checkbox" checked={showRailways} onChange={(e) => setShowRailways(e.target.checked)} /> ЖД пути</label>
+          <label><input type="checkbox" checked={showIndustrial} onChange={(e) => setShowIndustrial(e.target.checked)} /> Промзоны</label>
+          <label><input type="checkbox" checked={showAirports} onChange={(e) => setShowAirports(e.target.checked)} /> Аэропорты</label>
+          <label><input type="checkbox" checked={showBars} onChange={(e) => setShowBars(e.target.checked)} /> Бары/клубы</label>
         </div>
       </header>
 
@@ -227,7 +267,7 @@ function App() {
           />
           {showComfort && comfort ? (
             <GeoJSON
-              key={`comfort-${comfort.features?.length || 0}`}
+              key={`comfort-${comfortKey}`}
               data={comfort}
               style={comfortStyle}
               onEachFeature={onEachComfort}
@@ -235,14 +275,6 @@ function App() {
           ) : showComfort ? (
             <div className="placeholder">Загружается комфортность…</div>
           ) : null}
-
-          {showResidential && residential && (
-            <GeoJSON
-              key={`res-${residential.features?.length || 0}`}
-              data={residential}
-              style={residentialStyle}
-            />
-          )}
 
           {filteredPois && filteredPois.features.length > 0 && (
             <GeoJSON key={`pois-${filteredPois.features.length}`} data={filteredPois} pointToLayer={poiMarker} />
@@ -266,12 +298,6 @@ function App() {
           <div className="toast">
             <strong>Полигонов: {comfort.features.length}</strong>
             <div className="muted">API: {apiBase}</div>
-          </div>
-        )}
-        {resStatus === "error" && (
-          <div className="toast error" style={{ bottom: "140px" }}>
-            <strong>Ошибка жилой маски</strong>
-            <div>{resError || "Не удалось загрузить residential"}</div>
           </div>
         )}
         {poiStatus === "error" && (

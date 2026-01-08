@@ -87,13 +87,19 @@ def comfort_geojson():
     schema = safe_schema(request.args.get("schema", "public"))
     tolerance = clamp_float(request.args.get("tolerance"), 20.0, 0.0, 500.0)
 
-    w_metro = clamp_float(request.args.get("w_metro"), 0.5, 0.0, 1.0)
-    w_parks = clamp_float(request.args.get("w_parks"), 0.25, 0.0, 1.0)
-    w_schools = clamp_float(request.args.get("w_schools"), 0.25, 0.0, 1.0)
+    w_metro = clamp_float(request.args.get("w_metro"), 0.35, 0.0, 1.0)
+    w_parks = clamp_float(request.args.get("w_parks"), 0.20, 0.0, 1.0)
+    w_schools = clamp_float(request.args.get("w_schools"), 0.20, 0.0, 1.0)
+    w_noise = clamp_float(request.args.get("w_noise"), 0.25, 0.0, 1.0)
 
     d_metro = clamp_float(request.args.get("d_metro"), 1200.0, 100.0, 3000.0)
     d_parks = clamp_float(request.args.get("d_parks"), 800.0, 100.0, 3000.0)
     d_schools = clamp_float(request.args.get("d_schools"), 800.0, 100.0, 3000.0)
+    d_highway = clamp_float(request.args.get("d_highway"), 500.0, 50.0, 2000.0)
+    d_railway = clamp_float(request.args.get("d_railway"), 800.0, 100.0, 2000.0)
+    d_industrial = clamp_float(request.args.get("d_industrial"), 1000.0, 100.0, 3000.0)
+    d_airport = clamp_float(request.args.get("d_airport"), 5000.0, 500.0, 10000.0)
+    d_bars = clamp_float(request.args.get("d_bars"), 300.0, 50.0, 1000.0)
 
     sql = text(
         f"""
@@ -102,9 +108,15 @@ def comfort_geojson():
                 :w_metro AS w_metro,
                 :w_parks AS w_parks,
                 :w_schools AS w_schools,
+                :w_noise AS w_noise,
                 :d_metro AS d_metro,
                 :d_parks AS d_parks,
-                :d_schools AS d_schools
+                :d_schools AS d_schools,
+                :d_highway AS d_highway,
+                :d_railway AS d_railway,
+                :d_industrial AS d_industrial,
+                :d_airport AS d_airport,
+                :d_bars AS d_bars
         ), res AS (
             SELECT
                 row_number() OVER () AS fid,
@@ -120,15 +132,31 @@ def comfort_geojson():
                 metro.dist_m AS dist_metro_m,
                 parks.dist_m AS dist_parks_m,
                 schools.dist_m AS dist_schools_m,
+                highway.dist_m AS dist_highway_m,
+                railway.dist_m AS dist_railway_m,
+                industrial.dist_m AS dist_industrial_m,
+                airport.dist_m AS dist_airport_m,
+                bars.dist_m AS dist_bars_m,
                 p.w_metro,
                 p.w_parks,
                 p.w_schools,
+                p.w_noise,
                 p.d_metro,
                 p.d_parks,
                 p.d_schools,
+                p.d_highway,
+                p.d_railway,
+                p.d_industrial,
+                p.d_airport,
+                p.d_bars,
                 GREATEST(0, 1 - COALESCE(metro.dist_m, p.d_metro) / p.d_metro) AS metro_score,
                 GREATEST(0, 1 - COALESCE(parks.dist_m, p.d_parks) / p.d_parks) AS parks_score,
-                GREATEST(0, 1 - COALESCE(schools.dist_m, p.d_schools) / p.d_schools) AS schools_score
+                GREATEST(0, 1 - COALESCE(schools.dist_m, p.d_schools) / p.d_schools) AS schools_score,
+                CASE WHEN highway.dist_m IS NULL THEN 1.0 ELSE LEAST(1.0, highway.dist_m / p.d_highway) END AS highway_score,
+                CASE WHEN railway.dist_m IS NULL THEN 1.0 ELSE LEAST(1.0, railway.dist_m / p.d_railway) END AS railway_score,
+                CASE WHEN industrial.dist_m IS NULL THEN 1.0 ELSE LEAST(1.0, industrial.dist_m / p.d_industrial) END AS industrial_score,
+                CASE WHEN airport.dist_m IS NULL THEN 1.0 ELSE LEAST(1.0, airport.dist_m / p.d_airport) END AS airport_score,
+                CASE WHEN bars.dist_m IS NULL THEN 1.0 ELSE LEAST(1.0, bars.dist_m / p.d_bars) END AS bars_score
             FROM res r
             CROSS JOIN params p
             LEFT JOIN LATERAL (
@@ -149,6 +177,36 @@ def comfort_geojson():
                 ORDER BY r.geom <-> s.geom
                 LIMIT 1
             ) AS schools ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT ST_Distance(r.geom::geography, h.geom::geography) AS dist_m
+                FROM {schema}.highways h
+                ORDER BY r.geom <-> h.geom
+                LIMIT 1
+            ) AS highway ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT ST_Distance(r.geom::geography, rl.geom::geography) AS dist_m
+                FROM {schema}.railways rl
+                ORDER BY r.geom <-> rl.geom
+                LIMIT 1
+            ) AS railway ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT ST_Distance(r.geom::geography, iz.geom::geography) AS dist_m
+                FROM {schema}.industrial_zones iz
+                ORDER BY r.geom <-> iz.geom
+                LIMIT 1
+            ) AS industrial ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT ST_Distance(r.geom::geography, ap.geom::geography) AS dist_m
+                FROM {schema}.airports ap
+                ORDER BY r.geom <-> ap.geom
+                LIMIT 1
+            ) AS airport ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT ST_Distance(r.geom::geography, b.geom::geography) AS dist_m
+                FROM {schema}.bars b
+                ORDER BY r.geom <-> b.geom
+                LIMIT 1
+            ) AS bars ON TRUE
         ), agg AS (
             SELECT
                 fid,
@@ -157,16 +215,15 @@ def comfort_geojson():
                 dist_metro_m,
                 dist_parks_m,
                 dist_schools_m,
-                metro_score,
-                parks_score,
-                schools_score,
+                (highway_score + railway_score + industrial_score + airport_score + bars_score) / 5.0 AS noise_score,
                 CASE
-                    WHEN (w_metro + w_parks + w_schools) = 0 THEN 0
+                    WHEN (w_metro + w_parks + w_schools + w_noise) = 0 THEN 0
                     ELSE (
                         metro_score * w_metro +
                         parks_score * w_parks +
-                        schools_score * w_schools
-                    ) / (w_metro + w_parks + w_schools)
+                        schools_score * w_schools +
+                        ((highway_score + railway_score + industrial_score + airport_score + bars_score) / 5.0) * w_noise
+                    ) / (w_metro + w_parks + w_schools + w_noise)
                 END AS comfort_score
             FROM scored
         )
@@ -184,6 +241,7 @@ def comfort_geojson():
                     'id', fid,
                     'name', name,
                     'score', round(comfort_score::numeric, 3),
+                    'quietness', round(noise_score::numeric, 3),
                     'dist_metro_m', round(dist_metro_m::numeric, 1),
                     'dist_parks_m', round(dist_parks_m::numeric, 1),
                     'dist_schools_m', round(dist_schools_m::numeric, 1)
@@ -199,9 +257,15 @@ def comfort_geojson():
         bindparam("w_metro"),
         bindparam("w_parks"),
         bindparam("w_schools"),
+        bindparam("w_noise"),
         bindparam("d_metro"),
         bindparam("d_parks"),
         bindparam("d_schools"),
+        bindparam("d_highway"),
+        bindparam("d_railway"),
+        bindparam("d_industrial"),
+        bindparam("d_airport"),
+        bindparam("d_bars"),
     )
 
     params = {
@@ -209,9 +273,15 @@ def comfort_geojson():
         "w_metro": w_metro,
         "w_parks": w_parks,
         "w_schools": w_schools,
+        "w_noise": w_noise,
         "d_metro": d_metro,
         "d_parks": d_parks,
         "d_schools": d_schools,
+        "d_highway": d_highway,
+        "d_railway": d_railway,
+        "d_industrial": d_industrial,
+        "d_airport": d_airport,
+        "d_bars": d_bars,
     }
 
     engine = get_engine()
@@ -236,6 +306,21 @@ def pois_geojson():
             UNION ALL
             SELECT row_number() OVER () AS gid, 'school'::text AS kind, COALESCE(name, '') AS name, geom
             FROM {schema}.schools
+            UNION ALL
+            SELECT row_number() OVER () AS gid, 'highway'::text AS kind, COALESCE(name, '') AS name, geom
+            FROM {schema}.highways
+            UNION ALL
+            SELECT row_number() OVER () AS gid, 'railway'::text AS kind, COALESCE(name, '') AS name, geom
+            FROM {schema}.railways
+            UNION ALL
+            SELECT row_number() OVER () AS gid, 'industrial'::text AS kind, COALESCE(name, '') AS name, geom
+            FROM {schema}.industrial_zones
+            UNION ALL
+            SELECT row_number() OVER () AS gid, 'airport'::text AS kind, COALESCE(name, '') AS name, geom
+            FROM {schema}.airports
+            UNION ALL
+            SELECT row_number() OVER () AS gid, 'bar'::text AS kind, COALESCE(name, '') AS name, geom
+            FROM {schema}.bars
         ), prepared AS (
             SELECT
                 gid,
